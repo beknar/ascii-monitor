@@ -1,0 +1,11 @@
+make: Entering directory '/home/storm/code/ascii-monitor'
+g++ -Wall -Iinclude -std=c++17 src/main.cpp src/monitor.c -o ascii-monitor -lncurses -lpthread
+src/main.cpp: In function ‘int main(int, char**)’:
+src/main.cpp:60:13: warning: unused variable ‘usable_width’ [-Wunused-variable]
+   60 |         int usable_width = cols - left_col - 2;
+      |             ^~~~~~~~~~~~
+src/monitor.c:1: warning: "_GNU_SOURCE" redefined
+    1 | #define _GNU_SOURCE
+      | 
+<command-line>: note: this is the location of the previous definition
+make: Leaving directory '/home/storm/code/ascii-monitor'
