@@ -7,9 +7,11 @@
 // (failFast is off by default), so a failure on one node doesn't stop the rest.
 //
 // The build itself is just `gmake` (GNU make exists on every node; on Linux it's
-// a symlink to make). ascii-monitor is a Linux-only program at runtime (it reads
-// /proc), but it *compiles* everywhere, so this job is build-only — it never runs
-// the binary (it's an interactive ncurses TUI with no batch/test mode).
+// a symlink to make). The Makefile handles the per-OS specifics (e.g. -lkstat and
+// the ncurses include path on Solaris), so every node runs the same command.
+// ascii-monitor builds and runs on Linux, FreeBSD and Solaris, but this job is
+// build-only: it's an interactive ncurses TUI with no batch/test mode, so there's
+// nothing to execute in CI.
 
 pipeline {
     agent none
@@ -38,14 +40,9 @@ pipeline {
                             echo "Building ascii-monitor on ${NODE} (node=${env.NODE_NAME}, labels=${env.NODE_LABELS})"
                             sh '''
                                 set -eu
-                                # ascii-monitor links -lncurses. On Solaris the ncurses headers
-                                # live under /usr/include/ncurses (off the default search path),
-                                # so point the compiler at them via the env var rather than
-                                # editing the repo Makefile. No-op on Linux/FreeBSD.
-                                if [ "$(uname -s)" = "SunOS" ]; then
-                                    export CPLUS_INCLUDE_PATH=/usr/include/ncurses
-                                fi
-
+                                # The Makefile applies the per-OS flags itself (Solaris adds the
+                                # ncurses include path and -lkstat), so the command is identical
+                                # on every node.
                                 gmake clean || true
                                 gmake
 

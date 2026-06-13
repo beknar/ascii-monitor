@@ -1,9 +1,39 @@
+// System sampling for ascii-monitor.
+//
+// The monitor.h interface is platform-neutral; the implementations of
+// get_meminfo() and get_cpu_times() are necessarily OS-specific because each
+// kernel exposes these counters differently:
+//
+//   Linux   : parse /proc/meminfo and /proc/stat
+//   FreeBSD : sysctl (hw.physmem, vm.stats.vm.*, kern.cp_time[s]) — no /proc
+//   Solaris : sysconf (_SC_*PHYS_PAGES) for memory, kstat (cpu_stat) for CPU
+//
+// get_num_cpus() is the same everywhere (POSIX sysconf), so it's shared.
+//
+// cpu_times_t is modeled on Linux's eight /proc/stat fields. Platforms that
+// don't split the time that finely fill only the fields they have and leave the
+// rest 0 — the UI's usage math (idle+iowait vs. everything else) still works.
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "../include/monitor.h"
+
+// Logical CPU count — POSIX, identical on Linux/FreeBSD/Solaris.
+int get_num_cpus() {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? (int)n : 1;
+}
+
+// ===========================================================================
+#if defined(__linux__)
+// ---------------------------------------------------------------------------
+// Linux: /proc/meminfo + /proc/stat
+// ---------------------------------------------------------------------------
 
 int get_meminfo(meminfo_t *m) {
     if (!m) return -1;
@@ -19,11 +49,6 @@ int get_meminfo(meminfo_t *m) {
     fclose(f);
     if (m->mem_total_kb == 0) return -1;
     return 0;
-}
-
-int get_num_cpus() {
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return (n > 0) ? (int)n : 1;
 }
 
 int get_cpu_times(int cpu, cpu_times_t *t) {
@@ -58,3 +83,143 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
     fclose(f);
     return found ? 0 : -1;
 }
+
+// ===========================================================================
+#elif defined(__FreeBSD__)
+// ---------------------------------------------------------------------------
+// FreeBSD: sysctl. There is no /proc/meminfo or /proc/stat.
+// ---------------------------------------------------------------------------
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/resource.h>   // CPUSTATES, CP_USER..CP_IDLE
+
+static int sysctl_uint(const char *name, unsigned int *out) {
+    size_t len = sizeof(*out);
+    return sysctlbyname(name, out, &len, NULL, 0);
+}
+
+int get_meminfo(meminfo_t *m) {
+    if (!m) return -1;
+
+    unsigned long physmem = 0;
+    size_t len = sizeof(physmem);
+    if (sysctlbyname("hw.physmem", &physmem, &len, NULL, 0) != 0) return -1;
+
+    int pagesize = 0;
+    len = sizeof(pagesize);
+    if (sysctlbyname("hw.pagesize", &pagesize, &len, NULL, 0) != 0 || pagesize <= 0)
+        return -1;
+
+    // "Available" ~= free + inactive + cache pages (cache may be absent on
+    // newer FreeBSD, in which case the sysctl just stays 0 — fine).
+    unsigned int free_c = 0, inact_c = 0, cache_c = 0;
+    sysctl_uint("vm.stats.vm.v_free_count", &free_c);
+    sysctl_uint("vm.stats.vm.v_inactive_count", &inact_c);
+    sysctl_uint("vm.stats.vm.v_cache_count", &cache_c);
+
+    m->mem_total_kb = physmem / 1024UL;
+    unsigned long avail_bytes =
+        ((unsigned long)free_c + inact_c + cache_c) * (unsigned long)pagesize;
+    m->mem_available_kb = avail_bytes / 1024UL;
+    if (m->mem_total_kb == 0) return -1;
+    return 0;
+}
+
+int get_cpu_times(int cpu, cpu_times_t *t) {
+    if (!t) return -1;
+
+    long c[CPUSTATES];
+    if (cpu == -1) {
+        // Aggregate across all CPUs: kern.cp_time is one CPUSTATES array.
+        size_t len = sizeof(c);
+        if (sysctlbyname("kern.cp_time", c, &len, NULL, 0) != 0) return -1;
+    } else {
+        // Per-CPU: kern.cp_times is ncpu * CPUSTATES longs.
+        int ncpu = get_num_cpus();
+        if (cpu < 0 || cpu >= ncpu) return -1;
+        size_t len = 0;
+        if (sysctlbyname("kern.cp_times", NULL, &len, NULL, 0) != 0) return -1;
+        long *all = (long *)malloc(len);
+        if (!all) return -1;
+        if (sysctlbyname("kern.cp_times", all, &len, NULL, 0) != 0 ||
+            (size_t)(cpu + 1) * CPUSTATES * sizeof(long) > len) {
+            free(all);
+            return -1;
+        }
+        for (int i = 0; i < CPUSTATES; i++) c[i] = all[cpu * CPUSTATES + i];
+        free(all);
+    }
+
+    // FreeBSD states: user, nice, sys, intr, idle (no iowait/softirq/steal).
+    t->user = c[CP_USER];
+    t->nice = c[CP_NICE];
+    t->system = c[CP_SYS];
+    t->idle = c[CP_IDLE];
+    t->iowait = 0;
+    t->irq = c[CP_INTR];
+    t->softirq = 0;
+    t->steal = 0;
+    return 0;
+}
+
+// ===========================================================================
+#elif defined(__sun)
+// ---------------------------------------------------------------------------
+// Solaris (illumos): sysconf for memory, kstat (cpu_stat) for CPU.
+// Solaris /proc is the *process* filesystem — no /proc/meminfo or /proc/stat.
+// Build needs -lkstat.
+// ---------------------------------------------------------------------------
+#include <kstat.h>
+#include <sys/sysinfo.h>    // cpu_stat_t, CPU_IDLE/USER/KERNEL/WAIT, CPU_STATES
+
+int get_meminfo(meminfo_t *m) {
+    if (!m) return -1;
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long avail = sysconf(_SC_AVPHYS_PAGES);
+    long pagesz = sysconf(_SC_PAGE_SIZE);
+    if (pages <= 0 || pagesz <= 0) return -1;
+    m->mem_total_kb = ((unsigned long long)pages * (unsigned long long)pagesz) / 1024ULL;
+    m->mem_available_kb = (avail > 0)
+        ? ((unsigned long long)avail * (unsigned long long)pagesz) / 1024ULL
+        : 0;
+    return 0;
+}
+
+int get_cpu_times(int cpu, cpu_times_t *t) {
+    if (!t) return -1;
+    kstat_ctl_t *kc = kstat_open();
+    if (!kc) return -1;
+
+    unsigned long long user = 0, kern = 0, wait = 0, idle = 0;
+    int found = 0;
+    for (kstat_t *ks = kc->kc_chain; ks != NULL; ks = ks->ks_next) {
+        if (strcmp(ks->ks_module, "cpu_stat") != 0) continue;
+        if (cpu != -1 && ks->ks_instance != cpu) continue;
+        if (kstat_read(kc, ks, NULL) == -1) continue;
+        cpu_stat_t *cs = (cpu_stat_t *)ks->ks_data;
+        user += cs->cpu_sysinfo.cpu[CPU_USER];
+        kern += cs->cpu_sysinfo.cpu[CPU_KERNEL];
+        wait += cs->cpu_sysinfo.cpu[CPU_WAIT];
+        idle += cs->cpu_sysinfo.cpu[CPU_IDLE];
+        found = 1;
+        if (cpu != -1) break;          // a specific CPU: done
+    }
+    kstat_close(kc);
+    if (!found) return -1;
+
+    // Solaris folds nice into user and has no irq/softirq/steal accounting.
+    t->user = user;
+    t->nice = 0;
+    t->system = kern;
+    t->idle = idle;
+    t->iowait = wait;
+    t->irq = 0;
+    t->softirq = 0;
+    t->steal = 0;
+    return 0;
+}
+
+// ===========================================================================
+#else
+#error "ascii-monitor: unsupported platform (need Linux, FreeBSD, or Solaris)"
+#endif
