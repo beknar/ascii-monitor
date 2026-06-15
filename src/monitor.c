@@ -8,7 +8,8 @@
 //   FreeBSD : sysctl (hw.physmem, vm.stats.vm.*, kern.cp_time[s]) — no /proc
 //   Solaris : sysconf (_SC_*PHYS_PAGES) for memory, kstat (cpu_stat) for CPU
 //
-// get_num_cpus() is the same everywhere (POSIX sysconf), so it's shared.
+// get_num_cpus(), calc_cpu_usage() and usage_level() are platform-neutral
+// (POSIX / pure math), so they're shared above the per-OS sampling code.
 //
 // cpu_times_t is modeled on Linux's eight /proc/stat fields. Platforms that
 // don't split the time that finely fill only the fields they have and leave the
@@ -27,6 +28,30 @@
 int get_num_cpus() {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return (n > 0) ? (int)n : 1;
+}
+
+// CPU utilization (0..100) between two cumulative samples. Pure math, shared
+// across platforms; relies only on the cpu_times_t fields each OS fills in.
+double calc_cpu_usage(const cpu_times_t *a, const cpu_times_t *b) {
+    if (!a || !b) return 0.0;
+    unsigned long long idle_a = a->idle + a->iowait;
+    unsigned long long idle_b = b->idle + b->iowait;
+    unsigned long long nonidle_a = a->user + a->nice + a->system + a->irq + a->softirq + a->steal;
+    unsigned long long nonidle_b = b->user + b->nice + b->system + b->irq + b->softirq + b->steal;
+    unsigned long long total_a = idle_a + nonidle_a;
+    unsigned long long total_b = idle_b + nonidle_b;
+    if (total_b <= total_a) return 0.0;
+    unsigned long long totald = total_b - total_a;
+    unsigned long long idled = (idle_b > idle_a) ? (idle_b - idle_a) : 0;
+    if (totald == 0) return 0.0;
+    return (double)(totald - idled) * 100.0 / (double)totald;
+}
+
+// Map a utilization percentage to a severity level for color selection.
+usage_level_t usage_level(double pct) {
+    if (pct >= 85.0) return USAGE_HIGH;
+    if (pct >= 60.0) return USAGE_MED;
+    return USAGE_LOW;
 }
 
 // ===========================================================================

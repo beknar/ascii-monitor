@@ -23,6 +23,19 @@ int get_num_cpus();
 // Fill cpu_times_t for cpu index (0..n-1). Returns 0 on success
 int get_cpu_times(int cpu, cpu_times_t *t);
 
+// Compute CPU utilization percentage (0..100) between two cumulative samples.
+double calc_cpu_usage(const cpu_times_t *a, const cpu_times_t *b);
+
+// Usage severity levels used to pick a display color. Ordered low -> high.
+typedef enum {
+    USAGE_LOW = 0,   // comfortable
+    USAGE_MED = 1,   // getting busy
+    USAGE_HIGH = 2   // saturated
+} usage_level_t;
+
+// Map a percentage (0..100) to a severity level. Pure function, no I/O.
+usage_level_t usage_level(double pct);
+
 #ifdef __cplusplus
 }
 #endif

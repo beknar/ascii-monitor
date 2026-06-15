@@ -29,6 +29,22 @@ Build:
 Run:
   ./ascii-monitor
 
+Color:
+- Bars are colored by utilization: green (low), yellow (moderate), red (high).
+- Row labels use a cyan accent; percentages and counts keep the terminal's
+  default foreground so they stay readable.
+- Colors are drawn over the terminal's *default* background, so the output
+  looks right on both dark and light themes.
+- Set NO_COLOR=1 (https://no-color.org) to force the original monochrome
+  output; the program also falls back to monochrome on terminals without
+  color support.
+
+Test:
+  make test              # unit + regression + integration
+  make test-unit         # pure-logic tests (thresholds, CPU math)
+  make test-regression   # golden values + /proc parsing
+  make test-integration  # drives the real ncurses binary in a pty
+
 Notes:
 - ncurses is the only external dependency; everything else (sysctl/kstat/sysconf,
   pthread) is in the base system on each platform.

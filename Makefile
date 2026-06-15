@@ -19,5 +19,26 @@ all: ascii-monitor
 ascii-monitor: src/monitor.c src/main.cpp
 	$(CXX) $(CXXFLAGS) src/main.cpp src/monitor.c -o ascii-monitor $(LDFLAGS)
 
+# --- tests -------------------------------------------------------------------
+tests/test_unit: tests/test_unit.c src/monitor.c include/monitor.h
+	$(CC) $(CFLAGS) tests/test_unit.c src/monitor.c -o tests/test_unit
+
+tests/test_regression: tests/test_regression.c src/monitor.c include/monitor.h
+	$(CC) $(CFLAGS) tests/test_regression.c src/monitor.c -o tests/test_regression
+
+test-unit: tests/test_unit
+	./tests/test_unit
+
+test-regression: tests/test_regression
+	./tests/test_regression
+
+test-integration: ascii-monitor
+	bash tests/integration_test.sh
+
+test: test-unit test-regression test-integration
+	@echo "All test suites passed."
+
 clean:
-	rm -f ascii-monitor
+	rm -f ascii-monitor tests/test_unit tests/test_regression
+
+.PHONY: all test test-unit test-regression test-integration clean
