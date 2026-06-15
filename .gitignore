@@ -1,2 +1,4 @@
 ascii-monitor
 *.o
+tests/test_unit
+tests/test_regression
