@@ -36,6 +36,10 @@ typedef enum {
 // Map a percentage (0..100) to a severity level. Pure function, no I/O.
 usage_level_t usage_level(double pct);
 
+// Number of filled cells for a bar `cells` wide at `pct` percent, rounded and
+// clamped to [0, cells]. Pure function, no I/O. Used by the bar renderer.
+int bar_fill_cells(double pct, int cells);
+
 #ifdef __cplusplus
 }
 #endif
