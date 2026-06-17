@@ -29,6 +29,15 @@ Build:
 Run:
   ./ascii-monitor
 
+Graphics:
+- The UI is framed in an ANSI box with a centered title, and usage is shown with
+  block bars: solid blocks for the filled portion and a dim checkerboard track
+  for the remainder, wrapped in brackets.
+- The block/line glyphs come from ncurses' Alternate Character Set (terminfo
+  ACS), so they render the same on Linux, FreeBSD and Solaris with the plain
+  ncurses library — no UTF-8 locale or wide-character build required — and
+  degrade to ASCII on terminals without an ACS.
+
 Color:
 - Bars are colored by utilization: green (low), yellow (moderate), red (high).
 - Row labels use a cyan accent; percentages and counts keep the terminal's

@@ -54,6 +54,19 @@ usage_level_t usage_level(double pct) {
     return USAGE_LOW;
 }
 
+// Filled-cell count for a bar `cells` wide at `pct` percent, rounded to the
+// nearest cell and clamped to [0, cells]. Kept here (not in the renderer) so the
+// bar math is testable without a terminal.
+int bar_fill_cells(double pct, int cells) {
+    if (cells <= 0) return 0;
+    if (pct <= 0.0) return 0;
+    if (pct >= 100.0) return cells;
+    int f = (int)((pct / 100.0) * cells + 0.5);  /* pct>0 here, so +0.5 rounds */
+    if (f < 0) f = 0;
+    if (f > cells) f = cells;
+    return f;
+}
+
 // ===========================================================================
 #if defined(__linux__)
 // ---------------------------------------------------------------------------

@@ -43,6 +43,17 @@ int main(void) {
 
     CHECK(approx(calc_cpu_usage(NULL, &busy), 0.0), "NULL input -> 0% (no crash)");
 
+    printf("[unit] bar_fill_cells (block-bar fill math)\n");
+    CHECK(bar_fill_cells(0.0, 10)   == 0,  "0% of 10 -> 0 cells");
+    CHECK(bar_fill_cells(100.0, 10) == 10, "100% of 10 -> 10 cells");
+    CHECK(bar_fill_cells(50.0, 10)  == 5,  "50% of 10 -> 5 cells");
+    CHECK(bar_fill_cells(55.0, 10)  == 6,  "55% of 10 -> 6 cells (rounds up)");
+    CHECK(bar_fill_cells(54.0, 10)  == 5,  "54% of 10 -> 5 cells (rounds down)");
+    CHECK(bar_fill_cells(100.0, 0)  == 0,  "any% of 0 cells -> 0");
+    CHECK(bar_fill_cells(-5.0, 10)  == 0,  "negative% clamps to 0");
+    CHECK(bar_fill_cells(150.0, 10) == 10, "over 100% clamps to full");
+    CHECK(bar_fill_cells(1.0, 200)  == 2,  "1% of 200 -> 2 cells");
+
     if (failures) { printf("[unit] FAILED (%d)\n", failures); return 1; }
     printf("[unit] PASSED\n");
     return 0;
