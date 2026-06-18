@@ -6,6 +6,7 @@
 //
 //   Linux   : parse /proc/meminfo and /proc/stat
 //   FreeBSD : sysctl (hw.physmem, vm.stats.vm.*, kern.cp_time[s]) — no /proc
+//   OpenBSD : sysctl (VM_UVMEXP for memory, KERN_CPTIME/KERN_CPTIME2 for CPU)
 //   Solaris : sysconf (_SC_*PHYS_PAGES) for memory, kstat (cpu_stat) for CPU
 //
 // get_num_cpus(), calc_cpu_usage() and usage_level() are platform-neutral
@@ -258,6 +259,64 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
 }
 
 // ===========================================================================
+#elif defined(__OpenBSD__)
+// ---------------------------------------------------------------------------
+// OpenBSD: sysctl. Memory from the uvm page stats (VM_UVMEXP); CPU times from
+// KERN_CPTIME (aggregate) / KERN_CPTIME2 (per-CPU). No /proc, no kstat.
+// ---------------------------------------------------------------------------
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/sched.h>     // CPUSTATES, CP_USER..CP_IDLE
+#include <uvm/uvmexp.h>    // struct uvmexp
+#include <stdint.h>
+
+int get_meminfo(meminfo_t *m) {
+    if (!m) return -1;
+    struct uvmexp uvm;
+    int mib[2] = { CTL_VM, VM_UVMEXP };
+    size_t len = sizeof(uvm);
+    if (sysctl(mib, 2, &uvm, &len, NULL, 0) == -1) return -1;
+    unsigned long long pg = (unsigned long long)uvm.pagesize;
+    // Total = all managed physical pages; "available" ~= free + inactive
+    // (reclaimable), mirroring the FreeBSD estimate (OpenBSD has no separate
+    // cache queue), so the memory bar is an estimate, not an exact figure.
+    m->mem_total_kb = ((unsigned long long)uvm.npages * pg) / 1024ULL;
+    unsigned long long avail =
+        ((unsigned long long)uvm.free + (unsigned long long)uvm.inactive) * pg;
+    m->mem_available_kb = avail / 1024ULL;
+    if (m->mem_total_kb == 0) return -1;
+    return 0;
+}
+
+int get_cpu_times(int cpu, cpu_times_t *t) {
+    if (!t) return -1;
+    uint64_t c[CPUSTATES];
+    if (cpu == -1) {
+        // Aggregate across all CPUs (long[CPUSTATES]).
+        long cp[CPUSTATES];
+        int mib[2] = { CTL_KERN, KERN_CPTIME };
+        size_t len = sizeof(cp);
+        if (sysctl(mib, 2, cp, &len, NULL, 0) == -1) return -1;
+        for (int i = 0; i < CPUSTATES; i++) c[i] = (uint64_t)cp[i];
+    } else {
+        // Per-CPU (uint64_t[CPUSTATES]); the CPU index is the 3rd mib element.
+        int mib[3] = { CTL_KERN, KERN_CPTIME2, cpu };
+        size_t len = sizeof(c);
+        if (sysctl(mib, 3, c, &len, NULL, 0) == -1) return -1;
+    }
+    // OpenBSD states: user, nice, sys, intr, idle (no iowait/softirq/steal).
+    t->user = c[CP_USER];
+    t->nice = c[CP_NICE];
+    t->system = c[CP_SYS];
+    t->idle = c[CP_IDLE];
+    t->iowait = 0;
+    t->irq = c[CP_INTR];
+    t->softirq = 0;
+    t->steal = 0;
+    return 0;
+}
+
+// ===========================================================================
 #else
-#error "ascii-monitor: unsupported platform (need Linux, FreeBSD, or Solaris)"
+#error "ascii-monitor: unsupported platform (need Linux, FreeBSD, OpenBSD, or Solaris)"
 #endif

@@ -1,7 +1,8 @@
 // Build ascii-monitor on every node in the Jenkins fleet.
 //
 // The fleet's controller is gemini; the build nodes are abba, calibri, gabriel,
-// zariel, taroo (Linux), lulu, jindi, jindi2 (FreeBSD) and phoenix (Solaris).
+// zariel, taroo (Linux), lulu, jindi, jindi2 (FreeBSD), phoenix (Solaris) and
+// hornet (OpenBSD).
 // Each node's name is also one of its labels, so `agent { label "${NODE}" }`
 // pins one matrix cell per host. Cells run in parallel and are independent
 // (failFast is off by default), so a failure on one node doesn't stop the rest.
@@ -9,7 +10,7 @@
 // The build itself is just `gmake` (GNU make exists on every node; on Linux it's
 // a symlink to make). The Makefile handles the per-OS specifics (e.g. -lkstat and
 // the ncurses include path on Solaris), so every node runs the same command.
-// ascii-monitor builds and runs on Linux, FreeBSD and Solaris. There's nothing to
+// ascii-monitor builds and runs on Linux, FreeBSD, OpenBSD and Solaris. There's nothing to
 // run in CI (it's an interactive ncurses TUI with no batch/test mode), so each
 // cell builds, archives its binary, and -- only on `main` -- installs that binary
 // into /usr/local/bin on the same node it was built on. Because each cell builds
@@ -31,7 +32,7 @@ pipeline {
                     axis {
                         name 'NODE'
                         values 'abba', 'calibri', 'gabriel', 'zariel', 'taroo',
-                               'lulu', 'jindi', 'jindi2', 'phoenix'
+                               'lulu', 'jindi', 'jindi2', 'phoenix', 'hornet'
                     }
                 }
 

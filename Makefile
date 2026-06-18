@@ -13,6 +13,12 @@ ifeq ($(UNAME_S),SunOS)
     CXXFLAGS += -I/usr/include/ncurses
     LDFLAGS  += -lkstat
 endif
+ifeq ($(UNAME_S),OpenBSD)
+    # OpenBSD has no gcc/g++ in base (the gcc pkg is egcc/eg++); use the base
+    # clang as cc/c++. ncurses + pthread are in base, so no extra link flags.
+    CC=cc
+    CXX=c++
+endif
 
 all: ascii-monitor
 
