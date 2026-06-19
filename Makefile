@@ -2,7 +2,7 @@ CC=gcc
 CXX=g++
 CFLAGS=-Wall -Iinclude
 CXXFLAGS=-Wall -Iinclude -std=c++17
-LDFLAGS=-lncurses -lpthread
+LDFLAGS=-lncursesw -lpthread
 
 # Per-OS adjustments. Uses GNU make syntax, so build with `gmake` on FreeBSD and
 # Solaris (on Linux `make` already is GNU make). gmake is installed fleet-wide.
