@@ -69,6 +69,21 @@ int main(void) {
     cpu_times_t c0 = {0,0,0,0,0,0,0,0};
     CHECK(get_cpu_times(0, &c0) == 0, "cpu0 parses");
 
+    printf("[regression] get_disks discovers filesystems\n");
+    diskinfo_t disks[32];
+    int nd = get_disks(disks, 32);
+    /* >= 0 (no error); most hosts have >=1, but a thin jail may legitimately
+       enumerate none, so don't require >=1. */
+    CHECK(nd >= 0, "get_disks does not error");
+    int disks_valid = 1;
+    for (int i = 0; i < nd; i++) {
+        if (disks[i].mount[0] == '\0') disks_valid = 0;
+        if (disks[i].used_pct < 0.0 || disks[i].used_pct > 100.0) disks_valid = 0;
+    }
+    CHECK(disks_valid, "every discovered disk has a mount and used_pct in [0,100]");
+    { char msg[64]; snprintf(msg, sizeof(msg), "(discovered %d filesystem(s))", nd);
+      printf("  note: %s\n", msg); }
+
     if (failures) { printf("[regression] FAILED (%d)\n", failures); return 1; }
     printf("[regression] PASSED\n");
     return 0;

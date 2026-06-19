@@ -9,8 +9,13 @@
 //   OpenBSD : sysctl (VM_UVMEXP for memory, KERN_CPTIME/KERN_CPTIME2 for CPU)
 //   Solaris : sysconf (_SC_*PHYS_PAGES) for memory, kstat (cpu_stat) for CPU
 //
-// get_num_cpus(), calc_cpu_usage() and usage_level() are platform-neutral
-// (POSIX / pure math), so they're shared above the per-OS sampling code.
+// get_disks() auto-discovers mounted, real (disk-backed) filesystems and their
+// used-space %, also per-OS (Linux /proc/mounts, BSD getmntinfo, Solaris mnttab),
+// skipping pseudo filesystems via the shared fs_is_pseudo() denylist.
+//
+// get_num_cpus(), calc_cpu_usage(), usage_level(), bar_fill_cells() and
+// disk_usage_pct() are platform-neutral (POSIX / pure math), so they're shared
+// above the per-OS sampling code.
 //
 // cpu_times_t is modeled on Linux's eight /proc/stat fields. Platforms that
 // don't split the time that finely fill only the fields they have and leave the
@@ -68,11 +73,40 @@ int bar_fill_cells(double pct, int cells) {
     return f;
 }
 
+// Used-space percent from total/free blocks. Pure; guards div-by-zero and a
+// free count larger than total (seen transiently on some filesystems).
+double disk_usage_pct(unsigned long long total_blocks, unsigned long long free_blocks) {
+    if (total_blocks == 0) return 0.0;
+    if (free_blocks > total_blocks) free_blocks = total_blocks;
+    unsigned long long used = total_blocks - free_blocks;
+    return (double)used * 100.0 / (double)total_blocks;
+}
+
+// True if `type` is a virtual/pseudo filesystem we should NOT show as a disk.
+// Anything not on this denylist (ext*, xfs, ufs, ffs, zfs, …) is treated as a
+// real disk. Shared by the per-OS get_disks() implementations below.
+static int fs_is_pseudo(const char *type) {
+    if (!type || !*type) return 1;
+    static const char *skip[] = {
+        "tmpfs", "devtmpfs", "devfs", "proc", "procfs", "sysfs", "cgroup",
+        "cgroup2", "overlay", "squashfs", "ramfs", "autofs", "mqueue",
+        "hugetlbfs", "pstore", "securityfs", "efivarfs", "configfs", "debugfs",
+        "tracefs", "bpf", "binfmt_misc", "fusectl", "nsfs", "fdescfs", "fdesc",
+        "kernfs", "ptyfs", "mfs", "none", "swap", "objfs", "ctfs", "sharefs",
+        "fd", "mntfs", "lofs", "dev", "tmp", NULL
+    };
+    for (int i = 0; skip[i]; i++)
+        if (strcmp(type, skip[i]) == 0) return 1;
+    return 0;
+}
+
 // ===========================================================================
 #if defined(__linux__)
 // ---------------------------------------------------------------------------
-// Linux: /proc/meminfo + /proc/stat
+// Linux: /proc/meminfo + /proc/stat; disks from /proc/mounts + statvfs
 // ---------------------------------------------------------------------------
+#include <mntent.h>
+#include <sys/statvfs.h>
 
 int get_meminfo(meminfo_t *m) {
     if (!m) return -1;
@@ -123,6 +157,31 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
     return found ? 0 : -1;
 }
 
+int get_disks(diskinfo_t *out, int max) {
+    if (!out || max <= 0) return -1;
+    FILE *fp = setmntent("/proc/mounts", "r");
+    if (!fp) fp = setmntent("/etc/mtab", "r");
+    if (!fp) return -1;
+    int n = 0;
+    struct mntent *me;
+    while ((me = getmntent(fp)) != NULL && n < max) {
+        if (fs_is_pseudo(me->mnt_type)) continue;
+        struct statvfs vfs;
+        if (statvfs(me->mnt_dir, &vfs) != 0 || vfs.f_blocks == 0) continue;
+        int dup = 0;
+        for (int i = 0; i < n; i++)
+            if (strcmp(out[i].mount, me->mnt_dir) == 0) { dup = 1; break; }
+        if (dup) continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", me->mnt_fsname);
+        snprintf(out[n].mount, sizeof(out[n].mount), "%s", me->mnt_dir);
+        out[n].used_pct = disk_usage_pct((unsigned long long)vfs.f_blocks,
+                                         (unsigned long long)vfs.f_bfree);
+        n++;
+    }
+    endmntent(fp);
+    return n;
+}
+
 // ===========================================================================
 #elif defined(__FreeBSD__)
 // ---------------------------------------------------------------------------
@@ -131,6 +190,8 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/resource.h>   // CPUSTATES, CP_USER..CP_IDLE
+#include <sys/param.h>
+#include <sys/mount.h>      // getmntinfo, struct statfs
 
 static int sysctl_uint(const char *name, unsigned int *out) {
     size_t len = sizeof(*out);
@@ -201,6 +262,25 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
     return 0;
 }
 
+// FreeBSD: one getmntinfo() call returns all mounts (struct statfs[]).
+int get_disks(diskinfo_t *out, int max) {
+    if (!out || max <= 0) return -1;
+    struct statfs *mnt;
+    int count = getmntinfo(&mnt, MNT_NOWAIT);
+    if (count <= 0) return -1;
+    int n = 0;
+    for (int i = 0; i < count && n < max; i++) {
+        if (fs_is_pseudo(mnt[i].f_fstypename)) continue;
+        if (mnt[i].f_blocks == 0) continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", mnt[i].f_mntfromname);
+        snprintf(out[n].mount, sizeof(out[n].mount), "%s", mnt[i].f_mntonname);
+        out[n].used_pct = disk_usage_pct((unsigned long long)mnt[i].f_blocks,
+                                         (unsigned long long)mnt[i].f_bfree);
+        n++;
+    }
+    return n;
+}
+
 // ===========================================================================
 #elif defined(__sun)
 // ---------------------------------------------------------------------------
@@ -210,6 +290,8 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
 // ---------------------------------------------------------------------------
 #include <kstat.h>
 #include <sys/sysinfo.h>    // cpu_stat_t, CPU_IDLE/USER/KERNEL/WAIT, CPU_STATES
+#include <sys/mnttab.h>     // getmntent (Solaris flavor), struct mnttab
+#include <sys/statvfs.h>
 
 int get_meminfo(meminfo_t *m) {
     if (!m) return -1;
@@ -258,6 +340,27 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
     return 0;
 }
 
+// Solaris: walk /etc/mnttab (getmntent, Solaris signature) + statvfs each mount.
+int get_disks(diskinfo_t *out, int max) {
+    if (!out || max <= 0) return -1;
+    FILE *fp = fopen("/etc/mnttab", "r");
+    if (!fp) return -1;
+    struct mnttab mp;
+    int n = 0;
+    while (getmntent(fp, &mp) == 0 && n < max) {
+        if (fs_is_pseudo(mp.mnt_fstype)) continue;
+        struct statvfs vfs;
+        if (statvfs(mp.mnt_mountp, &vfs) != 0 || vfs.f_blocks == 0) continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", mp.mnt_special);
+        snprintf(out[n].mount, sizeof(out[n].mount), "%s", mp.mnt_mountp);
+        out[n].used_pct = disk_usage_pct((unsigned long long)vfs.f_blocks,
+                                         (unsigned long long)vfs.f_bfree);
+        n++;
+    }
+    fclose(fp);
+    return n;
+}
+
 // ===========================================================================
 #elif defined(__OpenBSD__)
 // ---------------------------------------------------------------------------
@@ -267,6 +370,7 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/sched.h>     // CPUSTATES, CP_USER..CP_IDLE
+#include <sys/mount.h>     // getmntinfo, struct statfs
 #include <uvm/uvmexp.h>    // struct uvmexp
 #include <stdint.h>
 
@@ -314,6 +418,25 @@ int get_cpu_times(int cpu, cpu_times_t *t) {
     t->softirq = 0;
     t->steal = 0;
     return 0;
+}
+
+// OpenBSD: getmntinfo() like FreeBSD (struct statfs from <sys/mount.h>).
+int get_disks(diskinfo_t *out, int max) {
+    if (!out || max <= 0) return -1;
+    struct statfs *mnt;
+    int count = getmntinfo(&mnt, MNT_NOWAIT);
+    if (count <= 0) return -1;
+    int n = 0;
+    for (int i = 0; i < count && n < max; i++) {
+        if (fs_is_pseudo(mnt[i].f_fstypename)) continue;
+        if (mnt[i].f_blocks == 0) continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", mnt[i].f_mntfromname);
+        snprintf(out[n].mount, sizeof(out[n].mount), "%s", mnt[i].f_mntonname);
+        out[n].used_pct = disk_usage_pct((unsigned long long)mnt[i].f_blocks,
+                                         (unsigned long long)mnt[i].f_bfree);
+        n++;
+    }
+    return n;
 }
 
 // ===========================================================================
