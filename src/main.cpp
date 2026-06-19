@@ -59,12 +59,13 @@ static int color_pair_for(usage_level_t lvl) {
 
 // Draw a bracketed gauge whose filled cells are hollow squares (Unicode U+25A1)
 // outlined in the utilization color — green (good), yellow (warning), red
-// (alert) — so the bar's color reflects its current state. Empty cells are a dim
-// ACS checkerboard. The percentage is printed at `px`; the track is [bx, bx+bw).
+// (alert) — so the bar's color reflects its current state. Empty cells are left
+// blank, so the squares fill into clear space inside the brackets as
+// utilization rises. The percentage is printed at `px`; the track is [bx, bx+bw).
 //
 // The hollow square uses the wide curses API (cchar_t/add_wch, -lncursesw) and a
 // UTF-8 locale; on a non-UTF-8 terminal it falls back to a solid ACS block. The
-// brackets, track and frame stay plain ACS, so the rest renders everywhere.
+// brackets and frame stay plain ACS, so the rest renders everywhere.
 static void draw_bar(int row, int px, int bx, int bw, double pct) {
     // Percentage label stays in the default color so it is always readable.
     mvprintw(row, px, "%3d%%", (int)std::round(pct));
@@ -80,7 +81,9 @@ static void draw_bar(int row, int px, int bx, int bw, double pct) {
     mvaddch(row, bx + bw - 1, ']');
     if (g_color_enabled) attroff(COLOR_PAIR(CP_LABEL));
 
-    chtype track = ACS_CKBOARD | A_DIM;      // dim checkerboard for empty cells
+    // Empty cells are left blank (no gray track), so the bar simply fills into
+    // clear space inside the brackets as utilization rises.
+    chtype track = ' ';
     for (int i = 0; i < inner; i++) {
         move(row, bx + 1 + i);
         if (i >= filled) { addch(track); continue; }
