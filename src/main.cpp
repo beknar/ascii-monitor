@@ -27,9 +27,6 @@ enum {
 };
 
 static bool g_color_enabled = false;
-// True when the locale is UTF-8, so we can draw the Unicode hollow square
-// (U+25A1). Otherwise we fall back to a solid ACS block.
-static bool g_use_unicode = false;
 
 // Initialize colors using the terminal's *default* background (-1) so the
 // output blends with both light and dark themes. Honors the NO_COLOR
@@ -63,9 +60,9 @@ static int color_pair_for(usage_level_t lvl) {
 // blank, so the squares fill into clear space inside the brackets as
 // utilization rises. The percentage is printed at `px`; the track is [bx, bx+bw).
 //
-// The hollow square uses the wide curses API (cchar_t/add_wch, -lncursesw) and a
-// UTF-8 locale; on a non-UTF-8 terminal it falls back to a solid ACS block. The
-// brackets and frame stay plain ACS, so the rest renders everywhere.
+// The hollow square uses the wide curses API (cchar_t/add_wch, -lncursesw); a
+// UTF-8 locale is forced in main() so it always renders as a square (never an
+// ASCII '#'). The brackets and frame stay plain ACS.
 static void draw_bar(int row, int px, int bx, int bw, double pct) {
     // Percentage label stays in the default color so it is always readable.
     mvprintw(row, px, "%3d%%", (int)std::round(pct));
@@ -87,17 +84,13 @@ static void draw_bar(int row, int px, int bx, int bw, double pct) {
     for (int i = 0; i < inner; i++) {
         move(row, bx + 1 + i);
         if (i >= filled) { addch(track); continue; }
-        if (g_use_unicode) {
-            cchar_t sq;
-            wchar_t wch[2] = { 0x25A1, 0 };  // ▢ WHITE SQUARE (hollow outline)
-            setcchar(&sq, wch, A_BOLD, sqpair, NULL);
-            add_wch(&sq);
-        } else {
-            // Non-UTF-8 fallback: a solid colored block in the same color.
-            chtype blk = ACS_BLOCK | A_BOLD;
-            if (g_color_enabled) blk |= COLOR_PAIR(pair);
-            addch(blk);
-        }
+        // Filled cell: always a hollow square (U+25A1), outline colored by the
+        // bar's level. The forced UTF-8 locale (see main) means it renders as a
+        // square — never an ASCII '#'.
+        cchar_t sq;
+        wchar_t wch[2] = { 0x25A1, 0 };  // WHITE SQUARE (hollow outline)
+        setcchar(&sq, wch, A_BOLD, sqpair, NULL);
+        add_wch(&sq);
     }
 }
 
@@ -127,12 +120,18 @@ static void draw_frame(int rows, int cols) {
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
-    // Adopt the user's locale so wide-char curses can render the Unicode hollow
-    // square; only enable it when the locale is actually UTF-8.
+    // Use a UTF-8 locale so the wide-char hollow square always renders. If the
+    // environment's locale isn't UTF-8 (e.g. a bare LANG=C over SSH), force a
+    // UTF-8 one — the bars must show hollow squares, never an ASCII '#'.
     setlocale(LC_ALL, "");
     const char *cs = nl_langinfo(CODESET);
-    g_use_unicode = cs && (strstr(cs, "UTF-8") || strstr(cs, "utf-8") ||
-                           strstr(cs, "UTF8")  || strstr(cs, "utf8"));
+    if (!cs || !(strstr(cs, "UTF-8") || strstr(cs, "utf-8") ||
+                 strstr(cs, "UTF8")  || strstr(cs, "utf8"))) {
+        const char *cands[] = { "C.UTF-8", "C.utf8", "en_US.UTF-8",
+                                "en_US.utf8", "POSIX.UTF-8", NULL };
+        for (int i = 0; cands[i]; i++)
+            if (setlocale(LC_CTYPE, cands[i])) break;
+    }
 
     initscr();
     cbreak();
