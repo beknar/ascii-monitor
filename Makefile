@@ -26,11 +26,14 @@ ascii-monitor: src/monitor.c src/main.cpp
 	$(CXX) $(CXXFLAGS) src/main.cpp src/monitor.c -o ascii-monitor $(LDFLAGS)
 
 # --- tests -------------------------------------------------------------------
+# The test programs link src/monitor.c, so they need the same per-OS link flags
+# as the main binary (notably -lkstat on Solaris for the kstat CPU sampling);
+# $(LDFLAGS) carries those. The unused libs (ncurses/pthread) are harmless.
 tests/test_unit: tests/test_unit.c src/monitor.c include/monitor.h
-	$(CC) $(CFLAGS) tests/test_unit.c src/monitor.c -o tests/test_unit
+	$(CC) $(CFLAGS) tests/test_unit.c src/monitor.c -o tests/test_unit $(LDFLAGS)
 
 tests/test_regression: tests/test_regression.c src/monitor.c include/monitor.h
-	$(CC) $(CFLAGS) tests/test_regression.c src/monitor.c -o tests/test_regression
+	$(CC) $(CFLAGS) tests/test_regression.c src/monitor.c -o tests/test_regression $(LDFLAGS)
 
 test-unit: tests/test_unit
 	./tests/test_unit
