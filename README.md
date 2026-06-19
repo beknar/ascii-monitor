@@ -38,7 +38,7 @@ Graphics:
 - The UI is framed in an ANSI box with a centered title. CPU, memory and disk
   usage are shown as bars of hollow squares (Unicode U+25A1) whose outlines are
   colored by the utilization state — green (good), yellow (warning), red (alert)
-  — over a dim checkerboard track, wrapped in brackets.
+  — wrapped in brackets, filling into blank space as utilization rises.
 - The hollow square uses the wide-character ncurses API (cchar_t/add_wch,
   linked against -lncursesw) and a UTF-8 locale; on a non-UTF-8 terminal it
   falls back to a solid ACS block. The frame, brackets and track are plain
@@ -60,6 +60,8 @@ Test:
   make test-integration  # drives the real ncurses binary in a pty (Linux only)
 
 Release notes:
+- v1.6 — blank bar track: the dim checkerboard behind the bars is removed; empty
+  cells are now blank, so the squares fill into clear space inside the brackets.
 - v1.5 — hollow-square bars: utilization is drawn as hollow squares (Unicode
   U+25A1) outlined in green/yellow/red for good/warning/alert, via wide-character
   ncurses (-lncursesw); falls back to a solid block on non-UTF-8 terminals.
