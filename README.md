@@ -17,7 +17,7 @@ system-sampling layer (src/monitor.c) is OS-specific:
 - Solaris — sysconf (physical pages), kstat (cpu_stat), /etc/mnttab (+ statvfs)
 
 Build & install dependencies:
-- Debian/Ubuntu:  sudo apt-get install -y build-essential g++ libncurses-dev
+- Debian/Ubuntu:  sudo apt-get install -y build-essential g++ libncursesw-dev
 - Fedora:         sudo dnf install -y gcc gcc-c++ make ncurses-devel
 - FreeBSD:        pkg install -y gcc gmake   (ncurses is in the base system)
 - OpenBSD:        pkg_add gmake              (clang + ncurses are in the base system)
@@ -36,13 +36,13 @@ Run:
 
 Graphics:
 - The UI is framed in an ANSI box with a centered title. CPU, memory and disk
-  usage are shown as bars of discrete colored blocks: each filled cell is a
-  solid block colored by its position along the bar (green -> yellow -> red),
-  over a dim checkerboard track, wrapped in brackets.
-- The block/line glyphs come from ncurses' Alternate Character Set (terminfo
-  ACS), so they render the same on Linux, FreeBSD, OpenBSD and Solaris with the
-  plain ncurses library — no UTF-8 locale or wide-character build required — and
-  degrade to ASCII on terminals without an ACS.
+  usage are shown as bars of hollow squares (Unicode U+25A1) whose outlines are
+  colored by the utilization state — green (good), yellow (warning), red (alert)
+  — over a dim checkerboard track, wrapped in brackets.
+- The hollow square uses the wide-character ncurses API (cchar_t/add_wch,
+  linked against -lncursesw) and a UTF-8 locale; on a non-UTF-8 terminal it
+  falls back to a solid ACS block. The frame, brackets and track are plain
+  terminfo ACS, so they render on Linux, FreeBSD, OpenBSD and Solaris.
 
 Color:
 - Bars are colored by utilization: green (low), yellow (moderate), red (high).
@@ -60,6 +60,9 @@ Test:
   make test-integration  # drives the real ncurses binary in a pty (Linux only)
 
 Release notes:
+- v1.5 — hollow-square bars: utilization is drawn as hollow squares (Unicode
+  U+25A1) outlined in green/yellow/red for good/warning/alert, via wide-character
+  ncurses (-lncursesw); falls back to a solid block on non-UTF-8 terminals.
 - v1.4 — disk monitoring + gradient block bars: auto-discovers each host's
   mounted, real (disk-backed) filesystems and shows a used-space bar for each;
   every bar is now a gradient of discrete colored blocks (green -> yellow -> red

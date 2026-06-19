@@ -5,6 +5,14 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <clocale>
+#include <cwchar>
+#include <langinfo.h>
+// Enable the X/Open wide-character curses API (cchar_t, setcchar, add_wch) for
+// the Unicode hollow-square glyph. Defined right before <ncurses.h> so it only
+// affects the curses header, not the C++ standard headers above. Links against
+// the wide library (-lncursesw); verified on Linux, FreeBSD, OpenBSD, Solaris.
+#define _XOPEN_SOURCE_EXTENDED 1
 #include <ncurses.h>
 #include "../include/monitor.h"
 
@@ -19,6 +27,9 @@ enum {
 };
 
 static bool g_color_enabled = false;
+// True when the locale is UTF-8, so we can draw the Unicode hollow square
+// (U+25A1). Otherwise we fall back to a solid ACS block.
+static bool g_use_unicode = false;
 
 // Initialize colors using the terminal's *default* background (-1) so the
 // output blends with both light and dark themes. Honors the NO_COLOR
@@ -46,23 +57,22 @@ static int color_pair_for(usage_level_t lvl) {
     }
 }
 
-// Draw a bracketed gauge of discrete colored blocks: the percentage is printed
-// at column `px`, and the bar track occupies columns [bx, bx+bw). Each *filled*
-// cell is its own solid ACS block, colored by its position along the bar — green
-// for the low cells, yellow as it climbs, red near the top — so usage reads as a
-// gradient of discrete colored blocks. Empty cells are a dim ACS checkerboard.
+// Draw a bracketed gauge whose filled cells are hollow squares (Unicode U+25A1)
+// outlined in the utilization color — green (good), yellow (warning), red
+// (alert) — so the bar's color reflects its current state. Empty cells are a dim
+// ACS checkerboard. The percentage is printed at `px`; the track is [bx, bx+bw).
 //
-// ACS_BLOCK / ACS_CKBOARD come from the terminal's Alternate Character Set, which
-// ncurses maps from the active terminfo entry. That means the block graphics
-// render identically on Linux, FreeBSD, OpenBSD and Solaris ncurses with the
-// plain (narrow) library and no UTF-8/wide-char dependency — and degrade
-// gracefully to ASCII on terminals without an ACS.
+// The hollow square uses the wide curses API (cchar_t/add_wch, -lncursesw) and a
+// UTF-8 locale; on a non-UTF-8 terminal it falls back to a solid ACS block. The
+// brackets, track and frame stay plain ACS, so the rest renders everywhere.
 static void draw_bar(int row, int px, int bx, int bw, double pct) {
     // Percentage label stays in the default color so it is always readable.
     mvprintw(row, px, "%3d%%", (int)std::round(pct));
     if (bw < 3) return;                      // need room for at least "[x]"
     int inner = bw - 2;                      // cells between the brackets
     int filled = bar_fill_cells(pct, inner);
+    int pair = color_pair_for(usage_level(pct));   // good / warning / alert color
+    short sqpair = g_color_enabled ? (short)pair : 0;
 
     // Brackets in the accent color (default color when colorless).
     if (g_color_enabled) attron(COLOR_PAIR(CP_LABEL));
@@ -71,15 +81,20 @@ static void draw_bar(int row, int px, int bx, int bw, double pct) {
     if (g_color_enabled) attroff(COLOR_PAIR(CP_LABEL));
 
     chtype track = ACS_CKBOARD | A_DIM;      // dim checkerboard for empty cells
-    move(row, bx + 1);
     for (int i = 0; i < inner; i++) {
+        move(row, bx + 1 + i);
         if (i >= filled) { addch(track); continue; }
-        // Color this discrete block by where it sits along the bar (0..100%),
-        // giving the green -> yellow -> red gradient.
-        double cellpct = (inner > 1) ? (double)i * 100.0 / (double)(inner - 1) : pct;
-        chtype blk = ACS_BLOCK | A_BOLD;
-        if (g_color_enabled) blk |= COLOR_PAIR(color_pair_for(usage_level(cellpct)));
-        addch(blk);
+        if (g_use_unicode) {
+            cchar_t sq;
+            wchar_t wch[2] = { 0x25A1, 0 };  // ▢ WHITE SQUARE (hollow outline)
+            setcchar(&sq, wch, A_BOLD, sqpair, NULL);
+            add_wch(&sq);
+        } else {
+            // Non-UTF-8 fallback: a solid colored block in the same color.
+            chtype blk = ACS_BLOCK | A_BOLD;
+            if (g_color_enabled) blk |= COLOR_PAIR(pair);
+            addch(blk);
+        }
     }
 }
 
@@ -108,6 +123,14 @@ static void draw_frame(int rows, int cols) {
 
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
+
+    // Adopt the user's locale so wide-char curses can render the Unicode hollow
+    // square; only enable it when the locale is actually UTF-8.
+    setlocale(LC_ALL, "");
+    const char *cs = nl_langinfo(CODESET);
+    g_use_unicode = cs && (strstr(cs, "UTF-8") || strstr(cs, "utf-8") ||
+                           strstr(cs, "UTF8")  || strstr(cs, "utf8"));
+
     initscr();
     cbreak();
     noecho();
