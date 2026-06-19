@@ -40,6 +40,24 @@ usage_level_t usage_level(double pct);
 // clamped to [0, cells]. Pure function, no I/O. Used by the bar renderer.
 int bar_fill_cells(double pct, int cells);
 
+// A monitored disk filesystem: backing device, mount point, and used-space %.
+typedef struct {
+    char name[64];    // device, e.g. "/dev/sda1" or a ZFS dataset "zroot/ROOT"
+    char mount[96];   // mount point, e.g. "/" or "/home"
+    double used_pct;  // 0..100, space used / total
+} diskinfo_t;
+
+// Used-space percent (0..100) given total and free blocks. Pure, no I/O:
+// clamps free<=total and guards total==0. Same units cancel, so block size
+// doesn't matter.
+double disk_usage_pct(unsigned long long total_blocks, unsigned long long free_blocks);
+
+// Auto-discover the active, real (disk-backed) mounted filesystems and fill up
+// to `max` diskinfo_t entries. Returns the count filled (>=0), or -1 on error.
+// Implementation is OS-specific (Linux mounts, BSD getmntinfo, Solaris mnttab);
+// pseudo/virtual filesystems (tmpfs, procfs, devfs, …) are skipped.
+int get_disks(diskinfo_t *out, int max);
+
 #ifdef __cplusplus
 }
 #endif

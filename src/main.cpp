@@ -46,22 +46,23 @@ static int color_pair_for(usage_level_t lvl) {
     }
 }
 
-// Draw a bracketed block bar: the percentage is printed at column `px`, and the
-// bar track occupies columns [bx, bx+bw). Filled cells use the solid ACS block
-// in the threshold color; the remainder is a dim ACS checkerboard "track".
+// Draw a bracketed gauge of discrete colored blocks: the percentage is printed
+// at column `px`, and the bar track occupies columns [bx, bx+bw). Each *filled*
+// cell is its own solid ACS block, colored by its position along the bar — green
+// for the low cells, yellow as it climbs, red near the top — so usage reads as a
+// gradient of discrete colored blocks. Empty cells are a dim ACS checkerboard.
 //
 // ACS_BLOCK / ACS_CKBOARD come from the terminal's Alternate Character Set, which
 // ncurses maps from the active terminfo entry. That means the block graphics
-// render identically on Linux, FreeBSD and Solaris ncurses with the plain
-// (narrow) library and no UTF-8/wide-char dependency — and degrade gracefully to
-// ASCII on terminals without an ACS.
+// render identically on Linux, FreeBSD, OpenBSD and Solaris ncurses with the
+// plain (narrow) library and no UTF-8/wide-char dependency — and degrade
+// gracefully to ASCII on terminals without an ACS.
 static void draw_bar(int row, int px, int bx, int bw, double pct) {
     // Percentage label stays in the default color so it is always readable.
     mvprintw(row, px, "%3d%%", (int)std::round(pct));
     if (bw < 3) return;                      // need room for at least "[x]"
     int inner = bw - 2;                      // cells between the brackets
     int filled = bar_fill_cells(pct, inner);
-    int pair = color_pair_for(usage_level(pct));
 
     // Brackets in the accent color (default color when colorless).
     if (g_color_enabled) attron(COLOR_PAIR(CP_LABEL));
@@ -69,12 +70,17 @@ static void draw_bar(int row, int px, int bx, int bw, double pct) {
     mvaddch(row, bx + bw - 1, ']');
     if (g_color_enabled) attroff(COLOR_PAIR(CP_LABEL));
 
-    // The bar itself. Bold solid blocks for the filled portion, a dim
-    // checkerboard for the rest — distinct even without color.
-    chtype fill  = ACS_BLOCK   | A_BOLD | (g_color_enabled ? COLOR_PAIR(pair) : 0);
-    chtype track = ACS_CKBOARD | A_DIM;
+    chtype track = ACS_CKBOARD | A_DIM;      // dim checkerboard for empty cells
     move(row, bx + 1);
-    for (int i = 0; i < inner; i++) addch(i < filled ? fill : track);
+    for (int i = 0; i < inner; i++) {
+        if (i >= filled) { addch(track); continue; }
+        // Color this discrete block by where it sits along the bar (0..100%),
+        // giving the green -> yellow -> red gradient.
+        double cellpct = (inner > 1) ? (double)i * 100.0 / (double)(inner - 1) : pct;
+        chtype blk = ACS_BLOCK | A_BOLD;
+        if (g_color_enabled) blk |= COLOR_PAIR(color_pair_for(usage_level(cellpct)));
+        addch(blk);
+    }
 }
 
 // Print a label in the accent color (falls back to default when colorless).
@@ -170,6 +176,28 @@ int main(int argc, char **argv) {
             int bx = px + 5;                 // after "NNN% "
             int bw = right - bx + 1;
             draw_bar(r, px, bx, bw, pct);
+        }
+
+        // Auto-discovered disk filesystems, one bar of used-space each, below the
+        // CPUs. The set is whatever this host actually has mounted (it differs by
+        // OS and host), so we just ask get_disks() each refresh.
+        diskinfo_t disks[24];
+        int nd = get_disks(disks, 24);       // -1 on error -> loop simply skips
+        for (int i = 0; i < nd; i++) {
+            int dr = oy + 1 + ncpus + i;
+            if (dr >= footer_row) break;     // out of vertical room
+            char dl[16];
+            snprintf(dl, sizeof(dl), "%-8.8s", disks[i].mount);   // mount-point label
+            draw_label(dr, ox, dl);
+            char dev[28];
+            snprintf(dev, sizeof(dev), "%.24s", disks[i].name);   // device, flush right
+            int devlen = (int)std::strlen(dev);
+            int dev_x = right - devlen + 1;
+            int px = ox + 9;                 // after the 8-char mount + a space
+            int bx = px + 5;                 // after "NNN% "
+            int bw = (dev_x - 1) - bx;       // leave a 1-col gap before the device
+            draw_bar(dr, px, bx, bw, disks[i].used_pct);
+            if (dev_x > bx) mvprintw(dr, dev_x, "%s", dev);
         }
 
         // Footer keeps the literal "quit" and the "[mono]" marker (the

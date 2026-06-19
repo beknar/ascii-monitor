@@ -10,10 +10,12 @@
 // The build itself is just `gmake` (GNU make exists on every node; on Linux it's
 // a symlink to make). The Makefile handles the per-OS specifics (e.g. -lkstat and
 // the ncurses include path on Solaris), so every node runs the same command.
-// ascii-monitor builds and runs on Linux, FreeBSD, OpenBSD and Solaris. There's nothing to
-// run in CI (it's an interactive ncurses TUI with no batch/test mode), so each
-// cell builds, archives its binary, and -- only on `main` -- installs that binary
-// into /usr/local/bin on the same node it was built on. Because each cell builds
+// ascii-monitor builds and runs on Linux, FreeBSD, OpenBSD and Solaris. Each cell
+// builds (`gmake`), runs the unit + regression test suites (`gmake test-unit
+// test-regression` — pure logic + live CPU/mem/disk sampling, portable to every
+// OS; the script(1)-based integration test is Linux-only and skipped), archives
+// its binary, and -- only on `main` -- installs that binary into /usr/local/bin
+// on the same node it was built on. Because each cell builds
 // natively and deploys locally, every host always gets the correct per-OS binary
 // with no cross-node copying. Feature/PR builds compile but never deploy.
 
@@ -54,6 +56,20 @@ pipeline {
                                 # Give each node's binary a distinct name so the archived
                                 # artifacts from all cells don't collide.
                                 cp ascii-monitor "ascii-monitor-${NODE_NAME}"
+                            '''
+                        }
+                    }
+
+                    stage('Test') {
+                        steps {
+                            echo "Running unit + regression tests on ${NODE} (node=${env.NODE_NAME})"
+                            sh '''
+                                set -eu
+                                # Pure-logic + live-system sampling checks (CPU/mem/
+                                # disk), portable to every fleet OS. The integration
+                                # test uses Linux-only script(1), so it is not run here.
+                                gmake test-unit
+                                gmake test-regression
                             '''
                         }
                     }

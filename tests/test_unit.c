@@ -54,6 +54,15 @@ int main(void) {
     CHECK(bar_fill_cells(150.0, 10) == 10, "over 100% clamps to full");
     CHECK(bar_fill_cells(1.0, 200)  == 2,  "1% of 200 -> 2 cells");
 
+    printf("[unit] disk_usage_pct (used-space math)\n");
+    CHECK(approx(disk_usage_pct(100, 100), 0.0),   "all blocks free -> 0%");
+    CHECK(approx(disk_usage_pct(100, 0),   100.0), "no blocks free -> 100%");
+    CHECK(approx(disk_usage_pct(100, 25),  75.0),  "25/100 free -> 75% used");
+    CHECK(approx(disk_usage_pct(0, 0),     0.0),   "zero total -> 0% (no div0)");
+    CHECK(approx(disk_usage_pct(100, 250), 0.0),   "free>total clamps -> 0% used");
+    CHECK(approx(disk_usage_pct(8000000000ULL, 2000000000ULL), 75.0),
+          "large block counts -> 75%");
+
     if (failures) { printf("[unit] FAILED (%d)\n", failures); return 1; }
     printf("[unit] PASSED\n");
     return 0;
