@@ -40,9 +40,10 @@ Graphics:
   colored by the utilization state — green (good), yellow (warning), red (alert)
   — wrapped in brackets, filling into blank space as utilization rises.
 - The hollow square uses the wide-character ncurses API (cchar_t/add_wch,
-  linked against -lncursesw) and a UTF-8 locale; on a non-UTF-8 terminal it
-  falls back to a solid ACS block. The frame, brackets and track are plain
-  terminfo ACS, so they render on Linux, FreeBSD, OpenBSD and Solaris.
+  linked against -lncursesw). A UTF-8 locale is forced at startup (falling back
+  to C.UTF-8/en_US.UTF-8 if the environment's locale isn't UTF-8) so the squares
+  always render — never an ASCII '#'. The frame and brackets are plain terminfo
+  ACS, so they render on Linux, FreeBSD, OpenBSD and Solaris.
 
 Color:
 - Bars are colored by utilization: green (low), yellow (moderate), red (high).
@@ -60,6 +61,9 @@ Test:
   make test-integration  # drives the real ncurses binary in a pty (Linux only)
 
 Release notes:
+- v1.7 — always-on hollow squares: a UTF-8 locale is forced at startup so the
+  filled cells always render as hollow squares (U+25A1), never the ASCII '#'
+  block that appeared on non-UTF-8 / no-ACS terminals.
 - v1.6 — blank bar track: the dim checkerboard behind the bars is removed; empty
   cells are now blank, so the squares fill into clear space inside the brackets.
 - v1.5 — hollow-square bars: utilization is drawn as hollow squares (Unicode
